@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Protótipo da ilha do Gemini CLI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#eceef3; --panel:#fafafc; --ink:#181a22; --muted:#626778; --line:#d7dae3;
+  --btn:#ffffff; --btn-hover:#eff0f6; --accent:#4b5df2; --accent-ink:#ffffff; --code:#eef0f6;
+  --ui:'Instrument Sans',system-ui,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono',Consolas,'Courier New',monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0b0d12; --panel:#14171f; --ink:#eceef5; --muted:#9aa0b2; --line:#272b37;
+    --btn:#1a1e28; --btn-hover:#222735; --accent:#7f8cff; --accent-ink:#0b0d12; --code:#0d1017;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b0d12; --panel:#14171f; --ink:#eceef5; --muted:#9aa0b2; --line:#272b37;
+  --btn:#1a1e28; --btn-hover:#222735; --accent:#7f8cff; --accent-ink:#0b0d12; --code:#0d1017;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 14px/1.5 var(--ui);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;max-width:1200px;margin:0 auto;padding:16px}
+@media (max-width:920px){.app{grid-template-columns:minmax(0,1fr)}}
+
+/* ---------- Palco: área de trabalho simulada ---------- */
+.stage{position:relative;height:clamp(520px,74vh,700px);border-radius:16px;overflow:hidden;
+  background:radial-gradient(120% 90% at 18% 0%,#2a3578 0%,#161c3f 42%,#0a0d1c 100%);isolation:isolate}
+.win{position:absolute;inset:66px clamp(12px,6%,64px) 62px;background:#12141a;border:1px solid rgba(255,255,255,.09);
+  border-radius:10px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.45)}
+.wbar{display:flex;gap:2px;align-items:flex-end;background:#0b0d12;padding:6px 8px 0;min-height:34px;overflow-x:auto}
+.tab{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:#8d93a6;padding:7px 12px;
+  border-radius:8px 8px 0 0;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{background:#12141a;color:#eef0f7}
+.tab i{width:8px;height:8px;border-radius:50%;background:#555b6e;display:inline-block}
+.term{flex:1;overflow:auto;padding:14px 16px;font:400 12.5px/1.65 var(--mono);color:#d9dce6}
+.ln{white-space:pre-wrap;word-break:break-word}
+.ln.sys{color:#7d8397}
+.ln.prompt{color:#f2f4fb;font-weight:500;margin-top:6px}
+.ln.tool{color:#7fd6ff}
+.ln.gem{color:#b7a8ff}
+.ln.ok{color:#86e8b0}
+.ln.err{color:#ff8f8f}
+.ln.warn{color:#ffc466}
+.ln.add{color:#86e8b0;background:rgba(134,232,176,.08)}
+.ln.del{color:#ff8f8f;background:rgba(255,125,125,.08)}
+.task{position:absolute;left:0;right:0;bottom:0;height:46px;background:rgba(8,10,18,.72);backdrop-filter:blur(10px);
+  display:flex;align-items:center;justify-content:center;gap:10px;border-top:1px solid rgba(255,255,255,.06)}
+.task i{width:24px;height:24px;border-radius:7px;background:rgba(255,255,255,.14)}
+.task i:nth-child(2){background:rgba(127,214,255,.4)}
+.task i:nth-child(4){background:rgba(183,168,255,.4)}
+
+/* ---------- Ilha ---------- */
+.hot{position:absolute;top:0;left:50%;transform:translateX(-50%);width:260px;height:30px;z-index:5}
+.island{position:absolute;top:0;left:50%;z-index:6;transform:translateX(-50%);
+  --peek-w:min(320px,calc(100vw - 64px));--open-w:min(408px,calc(100vw - 64px));
+  width:110px;height:5px;background:#000;color:#f1f2f7;border-radius:0 0 22px 22px;overflow:hidden;cursor:pointer;
+  transition:width .5s cubic-bezier(.2,.85,.25,1.08),height .5s cubic-bezier(.2,.85,.25,1.08),border-radius .5s}
+.island[data-mode="peek"]{width:var(--peek-w)}
+.island[data-mode="open"]{width:var(--open-w);border-radius:0 0 28px 28px;cursor:default}
+.peek,.open{position:absolute;top:0;left:50%;transform:translateX(-50%);opacity:0;visibility:hidden;
+  transition:opacity .22s,visibility 0s .22s}
+.island[data-mode="peek"] .peek,.island[data-mode="open"] .open{opacity:1;visibility:visible;transition:opacity .25s .12s,visibility 0s 0s}
+.peek{width:var(--peek-w);height:44px;display:flex;align-items:center;gap:10px;padding:0 18px}
+.peek span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+.peek em{font-style:normal;font-size:11.5px;color:#a3a8ba;background:rgba(255,255,255,.1);border-radius:99px;padding:1px 8px}
+.peek em:empty{display:none}
+.open{width:var(--open-w);padding:14px 16px 16px}
+.head{display:flex;align-items:center;gap:12px}
+.ht{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.ht strong{font-size:15px;font-weight:600}
+.ht span{font-size:12px;color:#a3a8ba}
+.close{border:0;background:rgba(255,255,255,.1);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:16px;line-height:1;color:#dfe2ee}
+.close:hover{background:rgba(255,255,255,.18)}
+.sess{list-style:none;margin:10px 0 0;padding:0}
+.sess button{display:flex;align-items:center;gap:10px;width:100%;border:0;text-align:left;cursor:pointer;
+  background:rgba(255,255,255,.06);padding:9px 12px;border-radius:12px;margin-top:6px}
+.sess button:hover{background:rgba(255,255,255,.11)}
+.sess i{width:9px;height:9px;border-radius:50%;flex:none}
+.sess b{font-weight:600;font-size:13px;flex:none}
+.sess span{font-size:12px;color:#a3a8ba;min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.empty{margin:12px 2px 2px;font-size:12.5px;color:#a3a8ba}
+.empty code,.perm code{font-family:var(--mono)}
+.perm{margin-top:10px;background:rgba(255,196,102,.1);border:1px solid rgba(255,196,102,.35);border-radius:14px;padding:12px}
+.perm p{margin:0 0 8px;font-size:13px}
+.perm code{display:block;background:rgba(0,0,0,.55);border-radius:8px;padding:8px 10px;font-size:12px;overflow:auto;white-space:nowrap}
+.perm .row{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.perm button{border:0;border-radius:10px;padding:8px 16px;font-weight:600;cursor:pointer}
+.perm .deny{background:rgba(255,255,255,.12);color:#eef0f7}
+.perm .allow{background:#ffc466;color:#1c1405}
+.island :focus-visible{outline-color:#a9b6ff}
+
+/* ---------- Painel de controle ---------- */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;align-self:start}
+.panel h1{font-size:19px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em}
+.panel h2{font-size:13px;font-weight:600;color:var(--muted);margin:18px 0 6px}
+.lead{margin:0;color:var(--muted);max-width:42ch}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;background:var(--btn);padding:8px;cursor:pointer;font-size:13px}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.ev{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;margin-top:6px;padding:9px 12px;
+  border:1px solid var(--line);background:var(--btn);border-radius:10px;cursor:pointer;text-align:left}
+.ev:hover{background:var(--btn-hover)}
+.ev small{font:400 11px var(--mono);color:var(--muted)}
+.go{width:100%;margin-top:16px;padding:11px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:pointer}
+.go:hover{filter:brightness(1.07)}
+.ghost{width:100%;margin-top:6px;padding:8px;border:0;background:transparent;color:var(--muted);cursor:pointer;border-radius:10px}
+.ghost:hover{background:var(--btn-hover)}
+pre{margin:6px 0 0;background:var(--code);border-radius:10px;padding:10px 12px;font:400 11.5px/1.55 var(--mono);overflow:auto;max-height:230px}
+.note{margin:8px 0 0;font-size:12.5px;color:var(--muted)}
+
+@media (prefers-reduced-motion:reduce){
+  .island,.peek,.open{transition-duration:.01s !important;transition-delay:0s !important}
+}
+</style>
+</head>
+<body>
+<main class="app">
+  <section class="stage" id="stage" aria-label="Área de trabalho simulada do Windows">
+    <div class="hot" id="hot"></div>
+    <div class="island" id="island" data-mode="hidden" tabindex="0" aria-label="Ilha do Gemini CLI" aria-expanded="false">
+      <div class="peek">
+        <canvas id="cvSmall" aria-hidden="true"></canvas>
+        <span id="peekText" aria-live="polite"></span>
+        <em id="peekMore"></em>
+      </div>
+      <div class="open" id="open">
+        <div class="head">
+          <canvas id="cvBig" aria-hidden="true"></canvas>
+          <div class="ht"><strong id="oTitle"></strong><span>Gemini CLI</span></div>
+          <button class="close" id="close" aria-label="Recolher a ilha">&times;</button>
+        </div>
+        <ul class="sess" id="sessList"></ul>
+        <div id="perm"></div>
+      </div>
+    </div>
+
+    <div class="win">
+      <div class="wbar" id="tabs" role="tablist" aria-label="Terminais"></div>
+      <div class="term" id="term"></div>
+    </div>
+    <div class="task" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  </section>
+
+  <aside class="panel">
+    <h1>Protótipo da ilha</h1>
+    <p class="lead">Tudo aqui é simulado: não existe Gemini CLI, hook nem servidor por trás. Dispare eventos e veja como a ilha reagiria.</p>
+
+    <h2>Sessão alvo</h2>
+    <div class="seg" id="seg">
+      <button data-k="loja" aria-pressed="true">loja-online</button>
+      <button data-k="api" aria-pressed="false">api-backend</button>
+    </div>
+
+    <h2>Eventos do hook</h2>
+    <button class="ev" data-act="start">Iniciar sessão <small>SessionStart</small></button>
+    <button class="ev" data-act="read">Ler arquivo <small>BeforeTool</small></button>
+    <button class="ev" data-act="edit">Editar arquivo <small>BeforeTool</small></button>
+    <button class="ev" data-act="run">Rodar comando <small>BeforeTool</small></button>
+    <button class="ev" data-act="ask">Pedir permissão <small>Notification</small></button>
+    <button class="ev" data-act="end">Terminar turno <small>AfterAgent</small></button>
+    <button class="ev" data-act="fail">Simular erro <small>AfterTool</small></button>
+
+    <button class="go" data-act="script">Rodar roteiro completo</button>
+    <button class="ghost" data-act="reset">Reiniciar</button>
+
+    <h2>Último payload do hook</h2>
+    <pre id="payload">—</pre>
+    <p class="note">Exemplo ilustrativo do JSON que o script do hook leria no stdin. Os campos reais podem variar.</p>
+    <p class="note">Passe o mouse no topo da área escura, clique na ilha e clique numa sessão para trocar a aba do terminal.</p>
+  </aside>
+</main>
+
+<script>
+(function(){
+'use strict';
+var $=function(s){return document.querySelector(s)};
+var clamp=function(v,a,b){return Math.max(a,Math.min(b,v))};
+var RM=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+var PROJECTS={
+  loja:{name:'loja-online',cwd:'C:\\dev\\loja-online',file:'src/cart.ts',test:'npm test',passed:'12 testes passaram',
+    risky:'npm install lodash',task:'corrigir o total do carrinho',
+    del:'-   const total = items.length * price;',add:'+   const total = items.reduce((s, i) => s + i.price * i.qty, 0);',
+    err:"TypeError: Cannot read properties of undefined (reading 'price')"},
+  api:{name:'api-backend',cwd:'C:\\dev\\api-backend',file:'routes/users.py',test:'pytest -q',passed:'31 passed in 2.4s',
+    risky:'pip install httpx',task:'validar o e-mail no cadastro',
+    del:'-     email = data["email"]',add:'+     email = validate_email(data["email"])',
+    err:'ConnectionRefusedError: 127.0.0.1:5432'}
+};
+var COLORS={idle:[185,167,255],working:[125,180,255],waiting:[255,196,102],done:[134,232,176],error:[255,125,125]};
+var STATUS_TXT={idle:'Conectado',waiting:'Aguardando você',done:'Terminou',error:'Com erro'};
+
+var S={sessions:{},logs:{},view:'loja',target:'loja',mode:'hidden',hover:false,
+  flashUntil:0,flashKind:'',flashKey:'',pending:null,gen:0,scriptRunning:{},lastEff:'idle',effT0:0};
+var PTR={x:window.innerWidth/2,y:window.innerHeight/2};
+window.addEventListener('pointermove',function(e){PTR.x=e.clientX;PTR.y=e.clientY},{passive:true});
+
+var island=$('#island'),stage=$('#stage'),hot=$('#hot'),openEl=$('#open');
+
+/* ---------- Personagem ---------- */
+function rgb(c,f){f=f||1;return 'rgb('+(c[0]*f|0)+','+(c[1]*f|0)+','+(c[2]*f|0)+')'}
+function Buddy(cv,css){
+  var dpr=Math.min(window.devicePixelRatio||1,2);
+  this.cv=cv;this.css=css;
+  cv.width=css*dpr;cv.height=css*dpr;cv.style.width=css+'px';cv.style.height=css+'px';
+  this.ctx=cv.getContext('2d');this.ctx.setTransform(dpr,0,0,dpr,0,0);
+  this.lx=0;this.ly=0;this.col=COLORS.idle.slice();this.nextBlink=1.5;this.blinkAt=-1;
+}
+Buddy.prototype.draw=function(t,st,e){
+  var ctx=this.ctx,css=this.css,m=RM?0:1,i;
+  ctx.clearRect(0,0,css,css);
+  var r=this.cv.getBoundingClientRect();
+  var tx=clamp((PTR.x-(r.left+r.width/2))/260,-1,1),ty=clamp((PTR.y-(r.top+r.height/2))/260,-1,1);
+  if(st==='working'){tx=Math.sin(t*1.6)*.7;ty=.35}
+  if(st==='waiting'){tx*=.3;ty*=.3}
+  this.lx+=(tx-this.lx)*.15;this.ly+=(ty-this.ly)*.15;
+  var target=COLORS[st];
+  for(i=0;i<3;i++)this.col[i]+=(target[i]-this.col[i])*.12;
+  if(t>this.nextBlink){this.blinkAt=t;this.nextBlink=t+2+Math.random()*3}
+  var bt=t-this.blinkAt,blink=(bt>=0&&bt<.14)?1-Math.sin(bt/.14*Math.PI)*.9:1;
+
+  var ox=0,oy=0,sx=1,sy=1,k=1,b;
+  if(st==='idle'){b=Math.sin(t*2.1);sx=1+.015*b*m;sy=1-.02*b*m}
+  if(st==='working'){b=Math.sin(t*7);sx=1+.035*b*m;sy=1-.035*b*m;oy=-Math.abs(Math.sin(t*3.5))*1.5*m}
+  if(st==='waiting'){oy=-Math.abs(Math.sin(t*4.5))*6*m;k=1.18}
+  if(st==='done'&&e<1.3){oy=-Math.abs(Math.sin(e*Math.PI*2.5))*9*(1-e/1.3)*m}
+  if(st==='error'){ox=Math.sin(t*45)*2*m*Math.max(0,1-e/.7)}
+
+  ctx.save();
+  var u=css/100;
+  ctx.translate(css/2+ox*u,css/2+oy*u);
+  ctx.scale(u*sx,u*sy);
+
+  var R=36;
+  ctx.beginPath();
+  for(i=0;i<=72;i++){
+    var a=i/72*Math.PI*2,c=Math.cos(a),s=Math.sin(a);
+    var x=R*(c<0?-1:1)*Math.pow(Math.abs(c),.55),y=R*(s<0?-1:1)*Math.pow(Math.abs(s),.55);
+    if(i)ctx.lineTo(x,y);else ctx.moveTo(x,y);
+  }
+  ctx.closePath();
+  var g=ctx.createLinearGradient(0,-R,0,R);
+  g.addColorStop(0,rgb(this.col));g.addColorStop(1,rgb(this.col,.78));
+  ctx.fillStyle=g;ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.28)';
+  ctx.beginPath();ctx.ellipse(-13,-27,11,4.5,-.2,0,Math.PI*2);ctx.fill();
+
+  var ink='#14161f',ey=-3+this.ly*4;
+  [-13,13].forEach(function(bx){
+    var x=bx+this.lx*5;
+    if(st==='done'){
+      ctx.strokeStyle=ink;ctx.lineWidth=4.5;ctx.lineCap='round';
+      ctx.beginPath();ctx.arc(x,ey+3,6,Math.PI*1.12,Math.PI*1.88);ctx.stroke();
+    }else if(st==='error'){
+      ctx.strokeStyle=ink;ctx.lineWidth=3.6;ctx.lineCap='round';
+      ctx.beginPath();ctx.moveTo(x-5,ey-5);ctx.lineTo(x+5,ey+5);ctx.moveTo(x+5,ey-5);ctx.lineTo(x-5,ey+5);ctx.stroke();
+    }else{
+      ctx.fillStyle=ink;ctx.beginPath();ctx.ellipse(x,ey,6*k,9*k*blink,0,0,Math.PI*2);ctx.fill();
+      if(blink>.5){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x+2,ey-3.5*k,2.2,0,Math.PI*2);ctx.fill()}
+    }
+  },this);
+
+  ctx.strokeStyle=ink;ctx.fillStyle=ink;ctx.lineCap='round';
+  if(st==='waiting'){ctx.beginPath();ctx.ellipse(0,15,3.6,4.6,0,0,Math.PI*2);ctx.fill()}
+  if(st==='done'){
+    ctx.lineWidth=3.2;ctx.beginPath();ctx.arc(0,9,7,Math.PI*.15,Math.PI*.85);ctx.stroke();
+    ctx.fillStyle='rgba(255,110,150,.4)';
+    ctx.beginPath();ctx.ellipse(-24,11,4.6,3,0,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.ellipse(24,11,4.6,3,0,0,Math.PI*2);ctx.fill();
+  }
+  if(st==='error'){ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-5,17);ctx.lineTo(5,17);ctx.stroke()}
+  ctx.restore();
+};
+var small=new Buddy($('#cvSmall'),30),big=new Buddy($('#cvBig'),54);
+
+/* ---------- Estado derivado ---------- */
+function list(){return Object.keys(S.sessions).map(function(k){return S.sessions[k]})}
+function nm(s){return PROJECTS[s.key].name}
+function effective(){
+  var l=list();
+  if(S.pending||l.some(function(s){return s.status==='waiting'}))return 'waiting';
+  if(l.some(function(s){return s.status==='working'}))return 'working';
+  if(performance.now()<S.flashUntil&&(S.flashKind==='done'||S.flashKind==='error'))return S.flashKind;
+  return 'idle';
+}
+function ensure(k){
+  if(!S.sessions[k])S.sessions[k]={key:k,status:'idle',detail:'',started:false};
+  return S.sessions[k];
+}
+
+/* ---------- Modo da ilha ---------- */
+function applyHeight(){
+  var h=S.mode==='hidden'?5:S.mode==='peek'?44:openEl.offsetHeight;
+  island.style.height=h+'px';
+}
+function setMode(m){
+  S.mode=m;island.dataset.mode=m;island.setAttribute('aria-expanded',m==='open');
+  applyHeight();
+}
+function refreshMode(){
+  if(S.mode==='open'){applyHeight();return}
+  var l=list();
+  var active=l.some(function(s){return s.status==='working'||s.status==='waiting'});
+  var flash=performance.now()<S.flashUntil;
+  setMode(active||flash||S.hover?'peek':'hidden');
+}
+function collapse(){S.mode='peek';refreshMode()}
+function flash(k,kind){
+  S.flashUntil=performance.now()+3600;S.flashKind=kind;S.flashKey=k;
+  setTimeout(refreshMode,3700);
+}
+
+/* ---------- Renderização ---------- */
+function peekInfo(){
+  var l=list(),w=l.filter(function(s){return s.status==='waiting'}),r=l.filter(function(s){return s.status==='working'});
+  var act=l.filter(function(s){return s.status==='waiting'||s.status==='working'}).length;
+  if(w.length)return{t:nm(w[0])+' precisa de você',n:act-1};
+  if(r.length)return{t:nm(r[0])+' · '+r[0].detail,n:r.length-1};
+  if(performance.now()<S.flashUntil&&S.sessions[S.flashKey]){
+    var s=S.sessions[S.flashKey];
+    var t=S.flashKind==='done'?' terminou':S.flashKind==='error'?' deu erro':' conectou';
+    return{t:nm(s)+t,n:0};
+  }
+  return{t:l.length?'Tudo quieto por aqui':'Nenhuma sessão do Gemini conectada',n:0};
+}
+function renderIsland(){
+  var p=peekInfo();
+  $('#peekText').textContent=p.t;
+  $('#peekMore').textContent=p.n>0?'+'+p.n:'';
+
+  var l=list(),act=l.filter(function(s){return s.status==='working'||s.status==='waiting'}).length;
+  $('#oTitle').textContent=S.pending?'Precisa de você':act>0?(act===1?'1 sessão rodando':act+' sessões rodando'):l.length?'Tudo tranquilo':'Nenhuma sessão';
+
+  var ul=$('#sessList');ul.textContent='';
+  if(!l.length){
+    var p2=document.createElement('p');p2.className='empty';
+    p2.append('Nenhuma sessão do Gemini CLI conectada. Rode ');
+    var cd=document.createElement('code');cd.textContent='gemini';p2.appendChild(cd);
+    p2.append(' no terminal.');
+    ul.appendChild(p2);
+  }
+  l.forEach(function(s){
+    var li=document.createElement('li'),b=document.createElement('button');
+    b.dataset.view=s.key;
+    var dot=document.createElement('i');dot.style.background=rgb(COLORS[s.status]);
+    var n=document.createElement('b');n.textContent=nm(s);
+    var d=document.createElement('span');d.textContent=(s.status==='working'?s.detail:(s.detail&&s.status!=='idle'?s.detail:STATUS_TXT[s.status]));
+    b.append(dot,n,d);li.appendChild(b);ul.appendChild(li);
+  });
+
+  var perm=$('#perm');perm.textContent='';
+  if(S.pending){
+    var box=document.createElement('div');box.className='perm';
+    var pp=document.createElement('p');
+    var st=document.createElement('strong');st.textContent=PROJECTS[S.pending.key].name;
+    pp.append(st,' quer executar');
+    var code=document.createElement('code');code.textContent=S.pending.cmd;
+    var row=document.createElement('div');row.className='row';
+    var no=document.createElement('button');no.className='deny';no.dataset.ans='0';no.textContent='Negar';
+    var yes=document.createElement('button');yes.className='allow';yes.dataset.ans='1';yes.textContent='Permitir';
+    row.append(no,yes);box.append(pp,code,row);perm.appendChild(box);
+  }
+}
+function renderTabs(){
+  var t=$('#tabs');t.textContent='';
+  Object.keys(PROJECTS).forEach(function(k){
+    var b=document.createElement('button');b.className='tab';b.dataset.tab=k;b.setAttribute('role','tab');
+    b.setAttribute('aria-selected',S.view===k);
+    var dot=document.createElement('i');
+    var s=S.sessions[k];if(s)dot.style.background=rgb(COLORS[s.status]);
+    b.append(dot,PROJECTS[k].name);t.appendChild(b);
+  });
+}
+function renderTerm(){
+  var el=$('#term');el.textContent='';
+  (S.logs[S.view]||[]).forEach(function(o){
+    var d=document.createElement('div');d.className='ln '+o.c;d.textContent=o.t;el.appendChild(d);
+  });
+  el.scrollTop=el.scrollHeight;
+}
+function render(){
+  renderIsland();renderTabs();
+  requestAnimationFrame(applyHeight);
+}
+function log(k,c,t){
+  var a=S.logs[k]||(S.logs[k]=[]);a.push({c:c,t:t});
+  if(a.length>200)a.shift();
+  if(k===S.view)renderTerm();
+}
+function hook(k,name,extra){
+  var P=PROJECTS[k];
+  var o={session_id:'ses_'+k+'_01',transcript_path:'C:\\Users\\voce\\.gemini\\tmp\\a1f3\\chats\\session.json',
+    cwd:P.cwd,hook_event_name:name,timestamp:new Date().toISOString()};
+  for(var key in extra)o[key]=extra[key];
+  $('#payload').textContent=JSON.stringify(o,null,2);
+}
+function seed(){
+  Object.keys(PROJECTS).forEach(function(k){
+    S.logs[k]=[{c:'prompt',t:'PS '+PROJECTS[k].cwd+'> gemini'},{c:'sys',t:'(aguardando eventos: use o painel ao lado)'}];
+  });
+}
+
+/* ---------- Ações simuladas ---------- */
+function tool(k,name,input,detail,line){
+  var s=ensure(k);if(!s.started)A.start(k);
+  s.status='working';s.detail=detail;
+  log(k,'tool',line);
+  hook(k,'BeforeTool',{tool_name:name,tool_input:input});
+  render();refreshMode();
+}
+function winPath(k){var P=PROJECTS[k];return P.cwd+'\\'+P.file.replace(/\//g,'\\')}
+var A={
+  start:function(k){
+    var P=PROJECTS[k],s=ensure(k);
+    s.started=true;s.status='idle';s.detail='';
+    log(k,'sys','Gemini CLI conectado · hooks ativos');
+    log(k,'prompt','> '+P.task);
+    hook(k,'SessionStart',{});
+    flash(k,'hello');render();refreshMode();
+  },
+  read:function(k){var P=PROJECTS[k];tool(k,'read_file',{absolute_path:winPath(k)},'Lendo '+P.file,'● read_file  '+P.file)},
+  edit:function(k){
+    var P=PROJECTS[k];
+    tool(k,'replace',{file_path:winPath(k),old_string:P.del.slice(1).trim(),new_string:P.add.slice(1).trim()},'Editando '+P.file,'● replace  '+P.file);
+    log(k,'del',P.del);log(k,'add',P.add);
+  },
+  run:function(k,cmd){tool(k,'run_shell_command',{command:cmd},'Rodando '+cmd,'● run_shell_command  '+cmd)},
+  ask:function(k,cmd){
+    return new Promise(function(res){
+      var s=ensure(k);if(!s.started)A.start(k);
+      s.status='waiting';s.detail='Quer rodar: '+cmd;
+      S.pending={key:k,cmd:cmd,res:res};
+      log(k,'warn','⚠ Permissão pedida: '+cmd);
+      hook(k,'Notification',{notification_type:'ToolPermission',message:'Gemini quer executar: '+cmd});
+      setMode('open');render();
+    });
+  },
+  end:function(k){
+    var P=PROJECTS[k],s=ensure(k);if(!s.started)A.start(k);
+    s.status='done';s.detail='Turno concluído';
+    log(k,'gem','✦ Pronto: '+P.task+'. Quer que eu rode os testes de novo?');
+    hook(k,'AfterAgent',{prompt:P.task});
+    flash(k,'done');render();refreshMode();
+  },
+  fail:function(k){
+    var P=PROJECTS[k],s=ensure(k);if(!s.started)A.start(k);
+    s.status='error';s.detail='Falha ao executar';
+    log(k,'err','✖ '+P.err);
+    hook(k,'AfterTool',{tool_name:'run_shell_command',tool_input:{command:P.test},tool_response:{error:P.err}});
+    flash(k,'error');render();refreshMode();
+  }
+};
+function answer(ok){
+  var p=S.pending;if(!p)return;
+  S.pending=null;
+  var s=S.sessions[p.key];
+  s.status=S.scriptRunning[p.key]?'working':'idle';
+  s.detail=ok?'Comando aprovado':'Comando negado';
+  log(p.key,ok?'ok':'err',ok?'✔ Aprovado pela ilha':'✖ Negado pela ilha');
+  p.res(ok);
+  S.mode='peek';refreshMode();render();
+}
+function runScript(k){
+  if(S.scriptRunning[k])return;
+  S.scriptRunning[k]=true;
+  var g=S.gen,P=PROJECTS[k];
+  function wait(ms){return new Promise(function(r){setTimeout(function(){r(g===S.gen)},ms)})}
+  (async function(){
+    try{
+      if(!S.sessions[k]||!S.sessions[k].started){A.start(k);if(!await wait(1500))return}
+      A.read(k);if(!await wait(1500))return;
+      A.edit(k);if(!await wait(1700))return;
+      A.run(k,P.test);if(!await wait(1600))return;
+      log(k,'ok','✔ '+P.passed);
+      if(!await wait(700))return;
+      var ok=await A.ask(k,P.risky);
+      if(g!==S.gen)return;
+      if(ok){
+        A.run(k,P.risky);if(!await wait(1500))return;
+        log(k,'ok','✔ dependência instalada');
+      }else{
+        log(k,'warn','Gemini seguiu por outro caminho, sem a dependência.');
+        if(!await wait(900))return;
+      }
+      A.end(k);
+    }finally{
+      if(g===S.gen)S.scriptRunning[k]=false;
+    }
+  })();
+}
+function reset(){
+  S.gen++;
+  if(S.pending){S.pending.res(false);S.pending=null}
+  S.sessions={};S.scriptRunning={};S.flashUntil=0;S.mode='hidden';
+  island.dataset.mode='hidden';island.setAttribute('aria-expanded','false');
+  seed();$('#payload').textContent='—';
+  renderTerm();render();applyHeight();
+}
+
+/* ---------- Eventos de interface ---------- */
+$('.panel').addEventListener('click',function(e){
+  var b=e.target.closest('[data-act]');
+  if(b){
+    var k=S.target,act=b.dataset.act;
+    if(act==='start')A.start(k);
+    else if(act==='read')A.read(k);
+    else if(act==='edit')A.edit(k);
+    else if(act==='run')A.run(k,PROJECTS[k].test);
+    else if(act==='ask'){if(!S.pending)A.ask(k,PROJECTS[k].risky)}
+    else if(act==='end')A.end(k);
+    else if(act==='fail')A.fail(k);
+    else if(act==='script')runScript(k);
+    else if(act==='reset')reset();
+    return;
+  }
+  var sg=e.target.closest('#seg button');
+  if(sg){
+    S.target=sg.dataset.k;S.view=sg.dataset.k;
+    document.querySelectorAll('#seg button').forEach(function(x){x.setAttribute('aria-pressed',x===sg)});
+    renderTabs();renderTerm();
+  }
+});
+$('#tabs').addEventListener('click',function(e){
+  var t=e.target.closest('[data-tab]');if(!t)return;
+  S.view=t.dataset.tab;renderTabs();renderTerm();
+});
+island.addEventListener('click',function(e){
+  if(e.target.closest('#close')){collapse();return}
+  var ans=e.target.closest('[data-ans]');
+  if(ans){answer(ans.dataset.ans==='1');return}
+  var row=e.target.closest('[data-view]');
+  if(row){S.view=row.dataset.view;renderTabs();renderTerm();return}
+  if(S.mode!=='open'){setMode('open');render()}
+});
+island.addEventListener('keydown',function(e){
+  if((e.key==='Enter'||e.key===' ')&&e.target===island&&S.mode!=='open'){e.preventDefault();setMode('open');render()}
+});
+hot.addEventListener('click',function(){setMode('open');render()});
+var leaveT=null;
+function enter(){clearTimeout(leaveT);S.hover=true;if(S.mode==='hidden')refreshMode()}
+function leave(){clearTimeout(leaveT);leaveT=setTimeout(function(){S.hover=false;refreshMode()},500)}
+[hot,island].forEach(function(el){el.addEventListener('pointerenter',enter);el.addEventListener('pointerleave',leave)});
+stage.addEventListener('pointerdown',function(e){
+  if(S.mode==='open'&&!island.contains(e.target))collapse();
+});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&S.mode==='open')collapse()});
+
+/* ---------- Loop de animação ---------- */
+function frame(ts){
+  var t=ts/1000,st=effective();
+  if(st!==S.lastEff){S.lastEff=st;S.effT0=t}
+  var e=t-S.effT0;
+  if(S.mode==='peek')small.draw(t,st,e);
+  if(S.mode==='open')big.draw(t,st,e);
+  requestAnimationFrame(frame);
+}
+
+seed();renderTabs();renderTerm();renderIsland();applyHeight();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
